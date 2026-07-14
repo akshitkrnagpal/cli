@@ -28,12 +28,26 @@ func NewProxy() Proxy {
 }
 
 func SetupPGX(config *pgx.ConnConfig) {
+	// The protocol proxy cannot inspect an encrypted connection without acting
+	// as a TLS endpoint. Preserve TLS rather than changing connection security
+	// when debug logging is enabled.
+	if config.TLSConfig != nil || hasTLSFallback(config) {
+		return
+	}
 	proxy := Proxy{
 		dialContext: config.DialFunc,
 		errChan:     make(chan error, 1),
 	}
 	config.DialFunc = proxy.DialFunc
-	config.TLSConfig = nil
+}
+
+func hasTLSFallback(config *pgx.ConnConfig) bool {
+	for _, fallback := range config.Fallbacks {
+		if fallback.TLSConfig != nil {
+			return true
+		}
+	}
+	return false
 }
 
 func (p *Proxy) DialFunc(ctx context.Context, network, addr string) (net.Conn, error) {

@@ -11,6 +11,7 @@ import (
 	"github.com/go-errors/errors"
 	"github.com/h2non/gock"
 	"github.com/jackc/pgconn"
+	"github.com/jackc/pgx/v4"
 	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -410,4 +411,23 @@ func TestPostgresURLWithoutPassword(t *testing.T) {
 	// credential is never written to stdout by the db __shadow seam.
 	assert.Equal(t, `postgresql://postgres@[2406:da18:4fd:9b0d:80ec:9812:3e65:450b]:5432/?connect_timeout=10&options=test`, url)
 	assert.NotContains(t, url, "%21%40%23")
+}
+
+func TestRemoveInsecureFallbacks(t *testing.T) {
+	config, err := pgx.ParseConfig("postgresql://postgres:password@db.example.com:5432/postgres")
+	require.NoError(t, err)
+	require.Len(t, config.Fallbacks, 1)
+	require.Nil(t, config.Fallbacks[0].TLSConfig)
+
+	removeInsecureFallbacks(config)
+
+	assert.Empty(t, config.Fallbacks)
+}
+
+func TestIsLoopbackPostgresURL(t *testing.T) {
+	assert.True(t, isLoopbackPostgresURL("postgresql://postgres:password@localhost:53322/postgres"))
+	assert.True(t, isLoopbackPostgresURL("postgresql://postgres:password@127.0.0.1:53322/postgres"))
+	assert.True(t, isLoopbackPostgresURL("postgresql://postgres:password@[::1]:53322/postgres"))
+	assert.False(t, isLoopbackPostgresURL("postgresql://postgres:password@db.example.com:5432/postgres"))
+	assert.False(t, isLoopbackPostgresURL("://invalid"))
 }

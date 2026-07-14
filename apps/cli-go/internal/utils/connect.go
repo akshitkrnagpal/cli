@@ -61,6 +61,34 @@ func toPostgresURL(config pgconn.Config, userinfo *url.Userinfo) string {
 	)
 }
 
+func isLoopbackPostgresURL(connString string) bool {
+	parsed, err := url.Parse(connString)
+	if err != nil {
+		return false
+	}
+	host := parsed.Hostname()
+	if strings.EqualFold(host, "localhost") {
+		return true
+	}
+	if ip := net.ParseIP(host); ip != nil {
+		return ip.IsLoopback()
+	}
+	return false
+}
+
+func removeInsecureFallbacks(config *pgx.ConnConfig) {
+	if config.TLSConfig == nil {
+		return
+	}
+	var fallbacks []*pgconn.FallbackConfig
+	for _, fallback := range config.Fallbacks {
+		if fallback.TLSConfig != nil {
+			fallbacks = append(fallbacks, fallback)
+		}
+	}
+	config.Fallbacks = fallbacks
+}
+
 var ErrPrimaryNotFound = errors.New("primary database not found")
 
 func GetPoolerConfigPrimary(ctx context.Context, ref string) (api.SupavisorConfigResponse, error) {
@@ -166,24 +194,15 @@ func ConnectLocalPostgres(ctx context.Context, config pgconn.Config, options ...
 	return ConnectByUrl(ctx, ToPostgresURL(config), options...)
 }
 
-func ConnectByUrl(ctx context.Context, url string, options ...func(*pgx.ConnConfig)) (*pgx.Conn, error) {
+func ConnectByUrl(ctx context.Context, connString string, options ...func(*pgx.ConnConfig)) (*pgx.Conn, error) {
 	if viper.GetBool("DEBUG") {
 		options = append(options, debug.SetupPGX)
 	}
-	// No fallback from TLS to unsecure connection
-	options = append(options, func(cc *pgx.ConnConfig) {
-		if cc.TLSConfig == nil {
-			return
-		}
-		var fallbacks []*pgconn.FallbackConfig
-		for _, fc := range cc.Fallbacks {
-			if fc.TLSConfig != nil {
-				fallbacks = append(fallbacks, fc)
-			}
-		}
-		cc.Fallbacks = fallbacks
-	})
-	conn, err := pgxv5.Connect(ctx, url, options...)
+	if !isLoopbackPostgresURL(connString) {
+		// No fallback from TLS to unsecure connection for remote hosts.
+		options = append(options, removeInsecureFallbacks)
+	}
+	conn, err := pgxv5.Connect(ctx, connString, options...)
 	SetConnectSuggestion(err)
 	return conn, err
 }

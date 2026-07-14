@@ -11,7 +11,7 @@ import (
 )
 
 func TestPostgresProxy(t *testing.T) {
-	const postgresUrl = "postgresql://postgres:password@127.0.0.1:5432/postgres"
+	const postgresUrl = "postgresql://postgres:password@127.0.0.1:5432/postgres?sslmode=disable"
 
 	t.Run("forwards messages between frontend and backend", func(t *testing.T) {
 		// Parse connection url
@@ -27,5 +27,26 @@ func TestPostgresProxy(t *testing.T) {
 		proxy, err := pgx.ConnectConfig(ctx, config)
 		assert.NoError(t, err)
 		assert.NoError(t, proxy.Close(ctx))
+	})
+
+	t.Run("preserves tls configuration", func(t *testing.T) {
+		config, err := pgx.ParseConfig("postgresql://postgres:password@db.example.com:5432/postgres?sslmode=require")
+		require.NoError(t, err)
+		require.NotNil(t, config.TLSConfig)
+
+		SetupPGX(config)
+
+		assert.NotNil(t, config.TLSConfig)
+	})
+
+	t.Run("preserves mixed tls fallbacks", func(t *testing.T) {
+		config, err := pgx.ParseConfig("postgresql://postgres:password@db.example.com:5432/postgres?sslmode=allow")
+		require.NoError(t, err)
+		require.Nil(t, config.TLSConfig)
+		require.True(t, hasTLSFallback(config))
+
+		SetupPGX(config)
+
+		assert.True(t, hasTLSFallback(config))
 	})
 }
